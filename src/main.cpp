@@ -21,20 +21,9 @@
 
 // Speed settings (0-3000, positive = CW, negative = CCW)
 #define SERVO_SPEED 1500
-#define SERVO_ACC 254 // Max 255
+#define SERVO_ACC 30 // Max 255
 
 SMS_STS sts;
-
-// Load monitoring
-unsigned long lastLoadPrint = 0;
-#define LOAD_PRINT_INTERVAL 200 // ms
-
-// Overload protection (CCW direction only)
-#define LOAD_THRESHOLD 510
-#define REVERSE_DURATION 4000 // ms
-unsigned long reverseStartTime[3] = {0, 0, 0};
-bool inReverse[3] = {false, false, false};
-bool waitForRelease[3] = {false, false, false}; // Wait for button release after reverse
 
 // Button state tracking
 struct ButtonState
@@ -97,13 +86,6 @@ void setup()
     int id = buttons[i].servoId;
     sts.WheelMode(id);
     delay(50);
-
-    // Verify by reading current speed
-    int pos = sts.ReadPos(id);
-    Serial.print("Servo ");
-    Serial.print(id);
-    Serial.print(": Pos=");
-    Serial.println(pos);
   }
 
   Serial.println("Initialization complete");
@@ -115,27 +97,6 @@ void loop()
   {
     bool cwPressed = (digitalRead(buttons[i].cwPin) == LOW);
     bool ccwPressed = (digitalRead(buttons[i].ccwPin) == LOW);
-
-    // Skip button handling during reverse operation
-    if (inReverse[i])
-    {
-      continue;
-    }
-
-    // Wait for button release after reverse completes
-    if (waitForRelease[i])
-    {
-      if (!cwPressed && !ccwPressed)
-      {
-        waitForRelease[i] = false;
-        buttons[i].lastCwState = true; // Reset to "not pressed"
-        buttons[i].lastCcwState = true;
-        Serial.print("S");
-        Serial.print(buttons[i].servoId);
-        Serial.println(" Button released, ready");
-      }
-      continue;
-    }
 
     // Determine desired speed
     int16_t speed = 0;
@@ -162,78 +123,13 @@ void loop()
       // Serial output
       Serial.print("Servo ");
       Serial.print(id);
-      Serial.print(" WriteSpe(");
-      Serial.print(speed);
-      Serial.print(", ");
-      Serial.print(SERVO_ACC);
-      Serial.print(") -> ");
-
-      // Read back to verify
-      delay(10);
-      int readSpeed = sts.ReadSpeed(id);
-      int readLoad = sts.ReadLoad(id);
-      Serial.print("Speed=");
-      Serial.print(readSpeed);
-      Serial.print(", Load=");
-      Serial.println(readLoad);
-    }
-  }
-
-  // Periodic load monitoring and overload protection
-  if (millis() - lastLoadPrint >= LOAD_PRINT_INTERVAL)
-  {
-    lastLoadPrint = millis();
-    for (int i = 0; i < 3; i++) // All servos
-    {
-      int id = buttons[i].servoId;
-      int load = sts.ReadLoad(id);
-      int spd = sts.ReadSpeed(id);
-      bool cw = (digitalRead(buttons[i].cwPin) == LOW);
-      bool ccw = (digitalRead(buttons[i].ccwPin) == LOW);
-
-      // Check for overload in CCW direction (negative speed)
-      if (!inReverse[i] && spd < 0 && load > LOAD_THRESHOLD)
-      {
-        // Overload detected - stop and reverse
-        inReverse[i] = true;
-        reverseStartTime[i] = millis();
-        sts.WriteSpe(id, SERVO_SPEED, SERVO_ACC); // Reverse to CW
-        Serial.print("*** S");
-        Serial.print(id);
-        Serial.println(" OVERLOAD! Reversing ***");
-      }
-
-      // Check if reverse duration has elapsed
-      if (inReverse[i] && (millis() - reverseStartTime[i] >= REVERSE_DURATION))
-      {
-        inReverse[i] = false;
-        waitForRelease[i] = true;       // Require button release before next operation
-        sts.WriteSpe(id, 0, SERVO_ACC); // Stop
-        Serial.print("*** S");
-        Serial.print(id);
-        Serial.println(" Reverse complete, release button ***");
-      }
-
-      Serial.print("S");
-      Serial.print(id);
-      Serial.print("[");
-      if (inReverse[i])
-        Serial.print("REV");
-      else if (waitForRelease[i])
-        Serial.print("WAIT");
-      else if (cw)
-        Serial.print("CW");
-      else if (ccw)
-        Serial.print("CCW");
+      if (speed > 0)
+        Serial.println(": CW");
+      else if (speed < 0)
+        Serial.println(": CCW");
       else
-        Serial.print("--");
-      Serial.print("] Spd=");
-      Serial.print(spd);
-      Serial.print(" Load=");
-      Serial.print(load);
-      Serial.print("  ");
+        Serial.println(": STOP");
     }
-    Serial.println();
   }
 
   delay(10);
